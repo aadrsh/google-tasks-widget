@@ -1,12 +1,16 @@
 # Tasks Widget & MCP Server (Unofficial for Google Tasks)
 
+![Platform](https://img.shields.io/badge/Platform-Linux-orange.svg)
+![Environment](https://img.shields.io/badge/Desktop-GNOME%20%7C%20Wayland%20%7C%20X11-blue.svg)
+![License](https://img.shields.io/badge/License-GPLv3-green.svg)
+
 > 🚀 **Coming Soon to Linux App Stores (Flathub & Snapcraft)!**  
 > We are currently preparing the native Flatpak/Snap packages and submitting the application for official Google OAuth verification. Stay tuned!
 
 > [!IMPORTANT]
 > **Legal Disclaimer**: This application is an independent, unofficial client and is NOT affiliated with, authorized, maintained, sponsored, or endorsed by Google LLC or any of its affiliates. "Google Tasks" is a trademark of Google LLC.
 
-A transparent, sticky, interactive desktop widget and **Model Context Protocol (MCP) Server** for Google Tasks built specifically for Linux desktop environments (GNOME / Wayland / X11). It supports syncing tasks from multiple Google Accounts simultaneously.
+A transparent, sticky, interactive desktop widget and **Model Context Protocol (MCP) Server** built specifically for **Linux Desktop Environments** (GNOME, Wayland, X11). It supports syncing tasks from multiple Google Accounts simultaneously.
 
 ---
 

@@ -5,7 +5,7 @@ setup(
     version='1.0.0',
     description='A transparent desktop widget for Google Tasks (Unofficial Client)',
     author='Antigravity',
-    py_modules=['main', 'auth', 'cli', 'mcp_server'],
+    py_modules=['main', 'auth', 'cli', 'mcp_server', 'assets'],
     package_data={
         '': ['resources/*'],
     },
@@ -15,7 +15,8 @@ setup(
         'google-auth-httplib2>=0.1.0',
         'google-auth-oauthlib>=1.1.0',
         'PyQt5>=5.15.0',
-        'mcp>=1.0.0'
+        'mcp>=1.0.0',
+        'pillow>=10.0.0',
     ],
     entry_points={
         'console_scripts': [

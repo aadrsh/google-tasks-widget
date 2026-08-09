@@ -2,7 +2,10 @@ import os
 import sys
 import json
 from typing import Optional, List
-from mcp.server.fastmcp import FastMCP
+try:
+    from mcp.server.fastmcp import FastMCP
+except ImportError:
+    from mcp.server import MCPServer as FastMCP
 from auth import list_accounts, get_service
 
 # Initialize FastMCP Server

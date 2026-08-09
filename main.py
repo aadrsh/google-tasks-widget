@@ -5,12 +5,21 @@ from datetime import datetime, date
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QLabel, 
                              QCheckBox, QScrollArea, QFrame, QHBoxLayout, 
                              QSpacerItem, QSizePolicy, QPushButton, QLineEdit, 
-                             QComboBox, QDateEdit, QListView)
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject, QDate
-from PyQt5.QtGui import QFont, QIcon
+                             QComboBox, QDateEdit, QListView, QMenu, QAction, 
+                             QInputDialog, QMessageBox)
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject, QDate, QSize, QByteArray
+from PyQt5.QtGui import QFont, QIcon, QPixmap, QPainter, QColor
 
-# Import our auth module
-from auth import list_accounts, get_service
+# Import our auth & assets module
+import base64
+from auth import list_accounts, get_service, add_account, remove_account
+from assets import EDIT_ICON_B64, DELETE_ICON_B64, PLUS_ICON_B64, REFRESH_ICON_B64
+
+def get_b64_pixmap(b64_str):
+    ba = QByteArray.fromBase64(b64_str.encode('utf-8'))
+    pm = QPixmap()
+    pm.loadFromData(ba)
+    return pm
 
 COMBO_STYLE = """
     QComboBox {
@@ -44,6 +53,25 @@ COMBO_STYLE = """
         border-radius: 6px;
         padding: 4px;
         outline: none;
+    }
+"""
+
+MENU_STYLE = """
+    QMenu {
+        background-color: #1e2124;
+        color: white;
+        border: 1px solid rgba(255, 255, 255, 30);
+        border-radius: 8px;
+        padding: 4px;
+    }
+    QMenu::item {
+        padding: 6px 16px;
+        border-radius: 4px;
+        font-size: 11px;
+    }
+    QMenu::item:selected {
+        background-color: #4da8da;
+        color: white;
     }
 """
 
@@ -82,6 +110,56 @@ class WorkerSignals(QObject):
     finished = pyqtSignal(object)
     error = pyqtSignal(str)
 
+class ImageButton(QWidget):
+    clicked = pyqtSignal()
+    def __init__(self, b64_icon, bg_color, hover_bg, tooltip="", parent=None):
+        super().__init__(parent)
+        self.setToolTip(tooltip)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedSize(26, 26)
+        self.bg_color = bg_color
+        self.hover_bg = hover_bg
+        self.is_hover = False
+        
+        pm = get_b64_pixmap(b64_icon)
+        self.pixmap = pm.scaled(16, 16, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+    def enterEvent(self, event):
+        self.is_hover = True
+        self.update()
+        super().enterEvent(event)
+        
+    def leaveEvent(self, event):
+        self.is_hover = False
+        self.update()
+        super().leaveEvent(event)
+        
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Determine background color
+        if self.is_hover:
+            fill_color = QColor(77, 168, 218, 220) if "77" in self.bg_color else QColor(255, 107, 107, 220)
+        else:
+            fill_color = QColor(77, 168, 218, 90) if "77" in self.bg_color else QColor(255, 107, 107, 90)
+            
+        # Fill background rounded rect
+        painter.setBrush(fill_color)
+        painter.setPen(QColor(255, 255, 255, 60))
+        painter.drawRoundedRect(0, 0, self.width() - 1, self.height() - 1, 5, 5)
+        
+        # Draw Pixmap centered
+        if not self.pixmap.isNull():
+            x = (self.width() - self.pixmap.width()) // 2
+            y = (self.height() - self.pixmap.height()) // 2
+            painter.drawPixmap(x, y, self.pixmap)
+
 class ApiWorker(threading.Thread):
     def __init__(self, target, *args, **kwargs):
         super().__init__()
@@ -103,9 +181,10 @@ class GoogleTasksWidget(QWidget):
         super().__init__()
         self.services = {} # Mapping of account_name -> service
         self.all_tasks_data = []
-        self.task_containers = [] # [(container_widget, title_text, notes_text)]
+        self.task_containers = [] # [(container_widget, title_text, notes_text, account_name)]
         self.account_lists_map = [] # [(account_name, list_id, list_title)]
         self.show_completed = False
+        self.selected_account_filter = "All Accounts"
         self.res_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'resources')
         
         self.initUI()
@@ -124,12 +203,7 @@ class GoogleTasksWidget(QWidget):
             Qt.Tool
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setGeometry(100, 100, 380, 680)
-        
-        # Set Custom Icon
-        icon_path = os.path.join(self.res_dir, 'icon.png')
-        if os.path.exists(icon_path):
-            self.setWindowIcon(QIcon(icon_path))
+        self.setGeometry(100, 100, 400, 680)
         
         self.main_layout = QVBoxLayout()
         self.main_layout.setContentsMargins(0,0,0,0)
@@ -164,61 +238,86 @@ class GoogleTasksWidget(QWidget):
         header_layout.addLayout(title_box)
         header_layout.addStretch()
         
-        # Add Task toggle button
-        self.add_btn = QPushButton()
-        self.add_btn.setIcon(QIcon(os.path.join(self.res_dir, 'plus.svg')))
-        self.add_btn.setFixedSize(30, 30)
-        self.add_btn.setToolTip("Create New Task")
+        # Add Task toggle text button with Base64 PNG icon
+        self.add_btn = QPushButton(" Add")
+        self.add_btn.setIcon(QIcon(get_b64_pixmap(PLUS_ICON_B64)))
+        self.add_btn.setIconSize(QSize(14, 14))
         self.add_btn.setStyleSheet("""
             QPushButton {
-                background-color: #4da8da; border-radius: 15px;
+                background-color: #4da8da; color: white; font-weight: bold;
+                border-radius: 6px; padding: 5px 10px; font-size: 11px;
+                qproperty-iconSize: 14px 14px;
             }
             QPushButton:hover { background-color: #3b82a6; }
         """)
         self.add_btn.clicked.connect(self.toggle_add_panel)
         header_layout.addWidget(self.add_btn)
         
-        # Refresh button
-        self.refresh_btn = QPushButton()
-        self.refresh_btn.setIcon(QIcon(os.path.join(self.res_dir, 'refresh.svg')))
-        self.refresh_btn.setFixedSize(30, 30)
-        self.refresh_btn.setToolTip("Refresh Tasks")
+        # Refresh text button with Base64 PNG icon
+        self.refresh_btn = QPushButton(" Refresh")
+        self.refresh_btn.setIcon(QIcon(get_b64_pixmap(REFRESH_ICON_B64)))
+        self.refresh_btn.setIconSize(QSize(14, 14))
         self.refresh_btn.setStyleSheet("""
             QPushButton {
-                background-color: transparent; border-radius: 15px;
+                background-color: rgba(255, 255, 255, 20); color: white;
+                border: 1px solid rgba(255, 255, 255, 30); border-radius: 6px;
+                padding: 5px 10px; font-size: 11px;
+                qproperty-iconSize: 14px 14px;
             }
-            QPushButton:hover { background-color: rgba(255, 255, 255, 30); }
+            QPushButton:hover { background-color: rgba(255, 255, 255, 40); }
         """)
         self.refresh_btn.clicked.connect(self.fetch_tasks)
         header_layout.addWidget(self.refresh_btn)
+
+        # 3-Dot Options Menu Button (⋮)
+        self.options_btn = QPushButton("⋮")
+        self.options_btn.setFixedSize(26, 26)
+        self.options_btn.setToolTip("Options & Accounts")
+        self.options_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent; color: white; font-size: 16px; font-weight: bold;
+                border-radius: 6px; border: 1px solid rgba(255, 255, 255, 30);
+            }
+            QPushButton:hover { background-color: rgba(255, 255, 255, 30); }
+        """)
+        self.options_btn.clicked.connect(self.show_options_menu)
+        header_layout.addWidget(self.options_btn)
         
         self.inner_layout.addLayout(header_layout)
         
-        # Filter & Toggle Bar Row
+        # Account Switcher & Search Bar Row
         filter_row = QHBoxLayout()
+        
+        # Account Filter Switcher Dropdown
+        self.account_switcher = QComboBox()
+        self.account_switcher.setView(QListView())
+        self.account_switcher.setStyleSheet(COMBO_STYLE)
+        self.account_switcher.addItem("All Accounts")
+        self.account_switcher.currentTextChanged.connect(self.on_account_filter_changed)
+        filter_row.addWidget(self.account_switcher)
         
         # Search Bar
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("🔍 Search tasks...")
+        self.search_input.setPlaceholderText("🔍 Search...")
         self.search_input.setStyleSheet("""
             QLineEdit {
                 background-color: rgba(0, 0, 0, 80);
                 color: white; border: 1px solid rgba(255, 255, 255, 20);
-                border-radius: 8px; padding: 5px 10px; font-size: 12px;
+                border-radius: 6px; padding: 5px 8px; font-size: 11px;
             }
             QLineEdit:focus { border: 1px solid #4da8da; }
         """)
         self.search_input.textChanged.connect(self.filter_tasks)
         filter_row.addWidget(self.search_input)
         
-        # Completed Toggle Button
+        # Completed Toggle Text Button
         self.completed_toggle_btn = QPushButton("Completed")
         self.completed_toggle_btn.setCheckable(True)
         self.completed_toggle_btn.setStyleSheet("""
             QPushButton {
                 background-color: rgba(255, 255, 255, 15); color: #aaaaaa;
-                border: 1px solid rgba(255, 255, 255, 20); border-radius: 8px;
-                padding: 5px 8px; font-size: 10px; font-weight: bold;
+                border: 1px solid rgba(255, 255, 255, 20); border-radius: 6px;
+                padding: 5px 8px; font-size: 11px; font-weight: bold;
             }
             QPushButton:checked {
                 background-color: #4da8da; color: white; border: 1px solid #4da8da;
@@ -286,7 +385,7 @@ class GoogleTasksWidget(QWidget):
         
         panel_layout.addLayout(date_repeat_layout)
         
-        # Submit Button
+        # Save Button
         self.save_task_btn = QPushButton("Save Task")
         self.save_task_btn.setStyleSheet("""
             QPushButton {
@@ -335,6 +434,69 @@ class GoogleTasksWidget(QWidget):
         self.main_layout.addWidget(self.bg_frame)
         self.setLayout(self.main_layout)
 
+    def show_options_menu(self):
+        menu = QMenu(self)
+        menu.setStyleSheet(MENU_STYLE)
+        
+        add_acc_act = QAction("➕ Add New Account...", self)
+        add_acc_act.triggered.connect(self.on_add_account_clicked)
+        menu.addAction(add_acc_act)
+        
+        remove_acc_act = QAction("➖ Remove Account...", self)
+        remove_acc_act.triggered.connect(self.on_remove_account_clicked)
+        menu.addAction(remove_acc_act)
+        
+        menu.addSeparator()
+        
+        refresh_act = QAction("🔄 Refresh All Tasks", self)
+        refresh_act.triggered.connect(self.fetch_tasks)
+        menu.addAction(refresh_act)
+        
+        about_act = QAction("ℹ️ About & Compliance", self)
+        about_act.triggered.connect(self.on_about_clicked)
+        menu.addAction(about_act)
+        
+        menu.exec_(self.options_btn.mapToGlobal(self.options_btn.rect().bottomLeft()))
+
+    def on_add_account_clicked(self):
+        account_name, ok = QInputDialog.getText(self, "Add Account", "Enter account nickname (e.g. work, personal):")
+        if ok and account_name.strip():
+            account_name = account_name.strip()
+            QMessageBox.information(
+                self, "Browser Authentication",
+                f"Opening browser for Google OAuth login for '{account_name}'..."
+            )
+            worker = ApiWorker(add_account, account_name)
+            worker.signals.finished.connect(lambda res: self.fetch_tasks())
+            worker.signals.error.connect(lambda err: QMessageBox.warning(self, "Auth Error", f"Failed to authenticate: {err}"))
+            worker.start()
+
+    def on_remove_account_clicked(self):
+        accounts = list_accounts()
+        if not accounts:
+            QMessageBox.information(self, "Remove Account", "No configured accounts to remove.")
+            return
+            
+        account_name, ok = QInputDialog.getItem(
+            self, "Remove Account", "Select account to remove:", accounts, 0, False
+        )
+        if ok and account_name:
+            if remove_account(account_name):
+                QMessageBox.information(self, "Account Removed", f"Account '{account_name}' removed.")
+                self.fetch_tasks()
+
+    def on_about_clicked(self):
+        QMessageBox.about(
+            self, "About Tasks Widget",
+            "<b>Tasks Widget (Unofficial)</b> v1.0<br>"
+            "A lightweight, transparent Linux desktop widget and MCP server for Google Tasks.<br><br>"
+            "<i>Legal Disclaimer:</i> This project is an independent, non-official client and is not affiliated, endorsed, or supported by Google LLC."
+        )
+
+    def on_account_filter_changed(self, text):
+        self.selected_account_filter = text
+        self.filter_tasks(self.search_input.text())
+
     def toggle_completed_view(self, checked):
         self.show_completed = checked
         self.fetch_tasks()
@@ -342,7 +504,7 @@ class GoogleTasksWidget(QWidget):
     def toggle_add_panel(self):
         is_vis = self.create_panel.isVisible()
         self.create_panel.setVisible(not is_vis)
-        self.add_btn.setText("-" if not is_vis else "")
+        self.add_btn.setText("Close" if not is_vis else "+ Add")
 
     def clear_tasks_layout(self):
         self.task_containers = []
@@ -367,8 +529,21 @@ class GoogleTasksWidget(QWidget):
         
         # Load all services dynamically
         accounts = list_accounts()
+        
+        # Populate Account Switcher Dropdown
+        current_acc_selection = self.account_switcher.currentText()
+        self.account_switcher.blockSignals(True)
+        self.account_switcher.clear()
+        self.account_switcher.addItem("All Accounts")
+        for acc in accounts:
+            self.account_switcher.addItem(f"👤 {acc}")
+        idx = self.account_switcher.findText(current_acc_selection)
+        if idx >= 0:
+            self.account_switcher.setCurrentIndex(idx)
+        self.account_switcher.blockSignals(False)
+        
         if not accounts:
-            lbl = QLabel("No accounts configured.\\nUse `google-tasks-cli add-account <name>` to add one.")
+            lbl = QLabel("No accounts configured.\\nUse 3-dot (⋮) menu -> Add New Account.")
             lbl.setStyleSheet("color: #ff9999;")
             lbl.setWordWrap(True)
             self.tasks_layout.addWidget(lbl)
@@ -382,7 +557,7 @@ class GoogleTasksWidget(QWidget):
                 self.services[acc] = service
         
         if not self.services:
-            lbl = QLabel("Authentication error for all accounts.\\nPlease re-authenticate using the CLI.")
+            lbl = QLabel("Authentication error for all accounts.\\nPlease re-authenticate using 3-dot (⋮) menu.")
             lbl.setStyleSheet("color: #ff9999;")
             lbl.setWordWrap(True)
             self.tasks_layout.addWidget(lbl)
@@ -424,7 +599,6 @@ class GoogleTasksWidget(QWidget):
                     filtered_tasks = tasks
                     
                 if filtered_tasks:
-                    # Organize parent-child subtask hierarchy
                     ordered_tasks = self._organize_subtask_hierarchy(filtered_tasks)
                     account_data['lists'].append({
                         'list_id': tasklist['id'],
@@ -437,18 +611,15 @@ class GoogleTasksWidget(QWidget):
         return all_accounts_data
 
     def _organize_subtask_hierarchy(self, tasks):
-        """Organizes tasks into parent-child hierarchy so subtasks immediately follow their parent."""
         parents = [t for t in tasks if not t.get('parent')]
         children = [t for t in tasks if t.get('parent')]
         
         ordered = []
         for p in parents:
             ordered.append(p)
-            # Find all children for this parent
             subtasks = [c for c in children if c.get('parent') == p['id']]
             ordered.extend(subtasks)
             
-        # Add any orphan subtasks whose parents might be completed/hidden
         remaining = [c for c in children if c not in ordered]
         ordered.extend(remaining)
         return ordered
@@ -479,18 +650,22 @@ class GoogleTasksWidget(QWidget):
             return
 
         for acc_data in all_accounts_data:
+            account_name = acc_data['account']
+            
             # Top level Account Header
-            acc_lbl = QLabel(f"👤 {acc_data['account']}")
-            acc_lbl.setFont(QFont('Segoe UI', 13, QFont.Bold))
+            acc_lbl = QLabel(f"👤 {account_name}")
+            acc_lbl.setFont(QFont('Segoe UI', 12, QFont.Bold))
             acc_lbl.setStyleSheet("color: #ffb347; margin-top: 15px; border-bottom: 1px solid rgba(255,255,255,30);")
+            acc_lbl.setProperty('account', account_name)
             self.tasks_layout.addWidget(acc_lbl)
             
             for group in acc_data['lists']:
                 # Group Header
-                lbl = QLabel(group['title'])
-                lbl.setFont(QFont('Segoe UI', 11, QFont.Bold))
-                lbl.setStyleSheet("color: #4da8da; margin-top: 8px; margin-bottom: 2px;")
-                self.tasks_layout.addWidget(lbl)
+                group_lbl = QLabel(group['title'])
+                group_lbl.setFont(QFont('Segoe UI', 11, QFont.Bold))
+                group_lbl.setStyleSheet("color: #4da8da; margin-top: 8px; margin-bottom: 2px;")
+                group_lbl.setProperty('account', account_name)
+                self.tasks_layout.addWidget(group_lbl)
                 
                 # Tasks
                 for task in group['tasks']:
@@ -501,9 +676,9 @@ class GoogleTasksWidget(QWidget):
                     
                     is_subtask = bool(task.get('parent'))
                     if is_subtask:
-                        task_layout.setContentsMargins(24, 0, 0, 8)
+                        task_layout.setContentsMargins(20, 0, 0, 8)
 
-                    # Top row: Checkbox, Subtask Indicator, Due Date, Edit & Delete Buttons
+                    # Top row: Checkbox, Subtask Indicator, Due Date, Edit & Delete Text Buttons
                     top_row = QWidget()
                     top_layout = QHBoxLayout(top_row)
                     top_layout.setContentsMargins(0,0,0,0)
@@ -516,7 +691,7 @@ class GoogleTasksWidget(QWidget):
                     cb.setChecked(is_completed)
                     
                     cb_style = """
-                        QCheckBox { color: white; spacing: 10px; }
+                        QCheckBox { color: white; spacing: 8px; }
                         QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px; border: 2px solid #555; }
                         QCheckBox::indicator:unchecked:hover { border: 2px solid #888; }
                         QCheckBox::indicator:checked { background-color: #4da8da; border: 2px solid #4da8da; }
@@ -543,30 +718,26 @@ class GoogleTasksWidget(QWidget):
                         date_lbl.setStyleSheet(f"color: {date_color}; font-size: 10px; font-weight: bold;")
                         top_layout.addWidget(date_lbl, alignment=Qt.AlignRight)
                         
-                    # Edit Task Button
-                    edit_btn = QPushButton()
-                    edit_btn.setIcon(QIcon(os.path.join(self.res_dir, 'edit.svg')))
-                    edit_btn.setFixedSize(22, 22)
-                    edit_btn.setToolTip("Edit task details")
-                    edit_btn.setStyleSheet("""
-                        QPushButton { background: transparent; border: none; padding: 2px; }
-                        QPushButton:hover { background: rgba(77, 168, 218, 40); border-radius: 4px; }
-                    """)
+                    # Edit Task Button (ImageButton with Base64 PNG)
+                    edit_btn = ImageButton(
+                        EDIT_ICON_B64,
+                        bg_color="rgba(77, 168, 218, 50)",
+                        hover_bg="#4da8da",
+                        tooltip="Edit task details"
+                    )
                     edit_btn.setProperty('task_data', task)
                     edit_btn.setProperty('account', acc_data['account'])
                     edit_btn.setProperty('list_id', group['list_id'])
                     edit_btn.clicked.connect(self.on_edit_task)
                     top_layout.addWidget(edit_btn)
 
-                    # Delete Task Button
-                    del_btn = QPushButton()
-                    del_btn.setIcon(QIcon(os.path.join(self.res_dir, 'delete.svg')))
-                    del_btn.setFixedSize(22, 22)
-                    del_btn.setToolTip("Delete task")
-                    del_btn.setStyleSheet("""
-                        QPushButton { background: transparent; border: none; padding: 2px; }
-                        QPushButton:hover { background: rgba(255, 107, 107, 40); border-radius: 4px; }
-                    """)
+                    # Delete Task Button (ImageButton with Base64 PNG)
+                    del_btn = ImageButton(
+                        DELETE_ICON_B64,
+                        bg_color="rgba(255, 107, 107, 50)",
+                        hover_bg="#ff6b6b",
+                        tooltip="Delete task"
+                    )
                     del_btn.setProperty('account', acc_data['account'])
                     del_btn.setProperty('task_id', task['id'])
                     del_btn.setProperty('list_id', group['list_id'])
@@ -581,7 +752,7 @@ class GoogleTasksWidget(QWidget):
                     if notes_text:
                         notes_lbl = QLabel(notes_text)
                         notes_lbl.setWordWrap(True)
-                        notes_lbl.setStyleSheet("color: #aaaaaa; font-size: 10px; margin-left: 26px;")
+                        notes_lbl.setStyleSheet("color: #aaaaaa; font-size: 10px; margin-left: 24px;")
                         task_layout.addWidget(notes_lbl)
 
                     # Links row
@@ -591,23 +762,25 @@ class GoogleTasksWidget(QWidget):
                             link_desc = link.get('description', 'Attachment')
                             link_lbl = QLabel(f'<a href="{link_url}" style="color: #4da8da; text-decoration: none;">🔗 {link_desc}</a>')
                             link_lbl.setOpenExternalLinks(True)
-                            link_lbl.setStyleSheet("margin-left: 26px; font-size: 10px;")
+                            link_lbl.setStyleSheet("margin-left: 24px; font-size: 10px;")
                             task_layout.addWidget(link_lbl)
 
                     self.tasks_layout.addWidget(task_container)
-                    self.task_containers.append((task_container, task['title'].lower(), notes_text.lower()))
+                    self.task_containers.append((task_container, task['title'].lower(), notes_text.lower(), account_name))
         
         self.tasks_layout.addSpacerItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding))
         self.refresh_btn.setEnabled(True)
+        self.filter_tasks(self.search_input.text())
 
     def filter_tasks(self, query):
         query = query.lower().strip()
-        for container, title, notes in list(self.task_containers):
+        selected_acc = self.selected_account_filter.replace("👤 ", "").strip()
+        
+        for container, title, notes, account in list(self.task_containers):
             try:
-                if not query or query in title or query in notes:
-                    container.setVisible(True)
-                else:
-                    container.setVisible(False)
+                matches_search = (not query or query in title or query in notes)
+                matches_account = (selected_acc == "All Accounts" or account == selected_acc)
+                container.setVisible(matches_search and matches_account)
             except RuntimeError:
                 pass
 
@@ -672,7 +845,6 @@ class GoogleTasksWidget(QWidget):
         account_name = cb.property('account')
         task_id = cb.property('task_id')
         list_id = cb.property('list_id')
-        container = cb.property('container')
         
         if checked:
             cb.setStyleSheet(cb.styleSheet() + "QCheckBox { color: #555555; text-decoration: line-through; }")
@@ -699,12 +871,10 @@ class GoogleTasksWidget(QWidget):
         account_name = btn.property('account')
         list_id = btn.property('list_id')
         
-        # Populate create_panel with task data for editing
         self.create_panel.setVisible(True)
         self.new_task_title.setText(task_data.get('title', ''))
         self.new_task_notes.setText(task_data.get('notes', ''))
         
-        # Set dropdown account/list match
         for idx in range(self.list_selector.count()):
             data = self.list_selector.itemData(idx)
             if data == (account_name, list_id):

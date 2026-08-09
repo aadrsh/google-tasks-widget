@@ -1,0 +1,24 @@
+# Credentials and Secrets
+credentials.json
+token.pickle
+*.pickle
+accounts/
+
+# Environment and Virtualenvs
+venv/
+env/
+ENV/
+
+# Python Cache & Build Artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+build/
+dist/
+*.egg-info/
+
+# IDE / OS
+.DS_Store
+.vscode/
+.idea/

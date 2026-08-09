@@ -160,14 +160,16 @@ class GoogleTasksWidget(QWidget):
         header_layout.addLayout(title_box)
         header_layout.addStretch()
         
+        res_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'resources')
+        
         # Add Task toggle button
-        self.add_btn = QPushButton("+")
+        self.add_btn = QPushButton()
+        self.add_btn.setIcon(QIcon(os.path.join(res_dir, 'plus.svg')))
         self.add_btn.setFixedSize(30, 30)
         self.add_btn.setToolTip("Create New Task")
         self.add_btn.setStyleSheet("""
             QPushButton {
-                background-color: #4da8da; color: white; 
-                font-size: 18px; font-weight: bold; border-radius: 15px;
+                background-color: #4da8da; border-radius: 15px;
             }
             QPushButton:hover { background-color: #3b82a6; }
         """)
@@ -175,13 +177,13 @@ class GoogleTasksWidget(QWidget):
         header_layout.addWidget(self.add_btn)
         
         # Refresh button
-        self.refresh_btn = QPushButton("↻")
+        self.refresh_btn = QPushButton()
+        self.refresh_btn.setIcon(QIcon(os.path.join(res_dir, 'refresh.svg')))
         self.refresh_btn.setFixedSize(30, 30)
         self.refresh_btn.setToolTip("Refresh Tasks")
         self.refresh_btn.setStyleSheet("""
             QPushButton {
-                background-color: transparent; color: white; 
-                font-size: 16px; border-radius: 15px;
+                background-color: transparent; border-radius: 15px;
             }
             QPushButton:hover { background-color: rgba(255, 255, 255, 30); }
         """)
@@ -478,12 +480,13 @@ class GoogleTasksWidget(QWidget):
                         top_layout.addWidget(date_lbl, alignment=Qt.AlignRight)
                         
                     # Delete Task Button
-                    del_btn = QPushButton("🗑")
-                    del_btn.setFixedSize(20, 20)
+                    del_btn = QPushButton()
+                    del_btn.setIcon(QIcon(os.path.join(res_dir, 'delete.svg')))
+                    del_btn.setFixedSize(22, 22)
                     del_btn.setToolTip("Delete task")
                     del_btn.setStyleSheet("""
-                        QPushButton { background: transparent; color: #ff6b6b; font-size: 12px; border: none; }
-                        QPushButton:hover { color: #ff3333; font-weight: bold; }
+                        QPushButton { background: transparent; border: none; padding: 2px; }
+                        QPushButton:hover { background: rgba(255, 107, 107, 40); border-radius: 4px; }
                     """)
                     del_btn.setProperty('account', acc_data['account'])
                     del_btn.setProperty('task_id', task['id'])

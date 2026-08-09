@@ -520,11 +520,14 @@ class GoogleTasksWidget(QWidget):
 
     def filter_tasks(self, query):
         query = query.lower().strip()
-        for container, title, notes in self.task_containers:
-            if not query or query in title or query in notes:
-                container.setVisible(True)
-            else:
-                container.setVisible(False)
+        for container, title, notes in list(self.task_containers):
+            try:
+                if not query or query in title or query in notes:
+                    container.setVisible(True)
+                else:
+                    container.setVisible(False)
+            except RuntimeError:
+                pass
 
     def submit_new_task(self):
         title = self.new_task_title.text().strip()
@@ -566,9 +569,12 @@ class GoogleTasksWidget(QWidget):
         worker.start()
 
     def _api_create_task(self, account_name, list_id, task_body):
-        service = self.services.get(account_name)
-        if service:
-            return service.tasks().insert(tasklist=list_id, body=task_body).execute()
+        try:
+            service = self.services.get(account_name)
+            if service:
+                return service.tasks().insert(tasklist=list_id, body=task_body).execute()
+        except Exception:
+            pass
         return None
 
     def _on_create_success(self, result):
@@ -597,14 +603,21 @@ class GoogleTasksWidget(QWidget):
             worker.start()
             
     def _api_complete_task(self, account_name, list_id, task_id):
-        service = self.services.get(account_name)
-        if service:
-            task = service.tasks().get(tasklist=list_id, task=task_id).execute()
-            task['status'] = 'completed'
-            service.tasks().update(tasklist=list_id, task=task_id, body=task).execute()
+        try:
+            service = self.services.get(account_name)
+            if service:
+                task = service.tasks().get(tasklist=list_id, task=task_id).execute()
+                task['status'] = 'completed'
+                service.tasks().update(tasklist=list_id, task=task_id, body=task).execute()
+        except Exception:
+            pass
 
     def on_delete_task(self):
         btn = self.sender()
+        if not btn or not btn.isEnabled():
+            return
+            
+        btn.setEnabled(False)
         account_name = btn.property('account')
         task_id = btn.property('task_id')
         list_id = btn.property('list_id')
@@ -612,14 +625,19 @@ class GoogleTasksWidget(QWidget):
         
         if container:
             container.setVisible(False)
+            self.task_containers = [item for item in self.task_containers if item[0] != container]
+            container.deleteLater()
             
         worker = ApiWorker(self._api_delete_task, account_name, list_id, task_id)
         worker.start()
 
     def _api_delete_task(self, account_name, list_id, task_id):
-        service = self.services.get(account_name)
-        if service:
-            service.tasks().delete(tasklist=list_id, task=task_id).execute()
+        try:
+            service = self.services.get(account_name)
+            if service:
+                service.tasks().delete(tasklist=list_id, task=task_id).execute()
+        except Exception:
+            pass
 
 def main():
     app = QApplication(sys.argv)

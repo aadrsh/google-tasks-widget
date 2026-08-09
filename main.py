@@ -59,20 +59,22 @@ def format_due_date(due_raw, recurrence=None):
         due_date = datetime.strptime(due_raw[:10], "%Y-%m-%d").date()
         today = date.today()
         diff = (due_date - today).days
+        formatted_day = due_date.strftime('%b %d')
         
         if diff < 0:
             if diff == -1:
-                return f"Yesterday{repeat_suffix}", "#ff6b6b"
+                return f"Yesterday ({formatted_day}){repeat_suffix}", "#ff6b6b"
             else:
-                return f"Overdue ({due_date.strftime('%b %d')}){repeat_suffix}", "#ff6b6b"
+                return f"Overdue ({formatted_day}){repeat_suffix}", "#ff6b6b"
         elif diff == 0:
-            return f"Today{repeat_suffix}", "#4da8da"
+            return f"Today ({formatted_day}){repeat_suffix}", "#4da8da"
         elif diff == 1:
-            return f"Tomorrow{repeat_suffix}", "#a8e6cf"
+            return f"Tomorrow ({formatted_day}){repeat_suffix}", "#a8e6cf"
         elif diff < 7:
-            return f"{due_date.strftime('%A')}{repeat_suffix}", "#dddddd"
+            day_name = due_date.strftime('%A')
+            return f"{day_name} ({formatted_day}){repeat_suffix}", "#dddddd"
         else:
-            return f"{due_date.strftime('%b %d')}{repeat_suffix}", "#888888"
+            return f"{formatted_day}{repeat_suffix}", "#888888"
     except Exception:
         return f"{due_raw[:10]}{repeat_suffix}", "#888888"
 

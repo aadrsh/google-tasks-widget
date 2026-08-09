@@ -6,6 +6,10 @@ setup(
     description='A transparent desktop widget for Google Tasks (Unofficial Client)',
     author='Antigravity',
     py_modules=['main', 'auth', 'cli', 'mcp_server'],
+    package_data={
+        '': ['resources/*'],
+    },
+    include_package_data=True,
     install_requires=[
         'google-api-python-client>=2.100.0',
         'google-auth-httplib2>=0.1.0',

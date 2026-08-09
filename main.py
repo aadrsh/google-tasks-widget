@@ -103,6 +103,7 @@ class GoogleTasksWidget(QWidget):
         self.all_tasks_data = []
         self.task_containers = [] # [(container_widget, title_text, notes_text)]
         self.account_lists_map = [] # [(account_name, list_id, list_title)]
+        self.res_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'resources')
         
         self.initUI()
         
@@ -123,7 +124,7 @@ class GoogleTasksWidget(QWidget):
         self.setGeometry(100, 100, 380, 650)
         
         # Set Custom Icon
-        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'resources', 'icon.png')
+        icon_path = os.path.join(self.res_dir, 'icon.png')
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
         
@@ -160,11 +161,9 @@ class GoogleTasksWidget(QWidget):
         header_layout.addLayout(title_box)
         header_layout.addStretch()
         
-        res_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'resources')
-        
         # Add Task toggle button
         self.add_btn = QPushButton()
-        self.add_btn.setIcon(QIcon(os.path.join(res_dir, 'plus.svg')))
+        self.add_btn.setIcon(QIcon(os.path.join(self.res_dir, 'plus.svg')))
         self.add_btn.setFixedSize(30, 30)
         self.add_btn.setToolTip("Create New Task")
         self.add_btn.setStyleSheet("""
@@ -178,7 +177,7 @@ class GoogleTasksWidget(QWidget):
         
         # Refresh button
         self.refresh_btn = QPushButton()
-        self.refresh_btn.setIcon(QIcon(os.path.join(res_dir, 'refresh.svg')))
+        self.refresh_btn.setIcon(QIcon(os.path.join(self.res_dir, 'refresh.svg')))
         self.refresh_btn.setFixedSize(30, 30)
         self.refresh_btn.setToolTip("Refresh Tasks")
         self.refresh_btn.setStyleSheet("""
@@ -481,7 +480,7 @@ class GoogleTasksWidget(QWidget):
                         
                     # Delete Task Button
                     del_btn = QPushButton()
-                    del_btn.setIcon(QIcon(os.path.join(res_dir, 'delete.svg')))
+                    del_btn.setIcon(QIcon(os.path.join(self.res_dir, 'delete.svg')))
                     del_btn.setFixedSize(22, 22)
                     del_btn.setToolTip("Delete task")
                     del_btn.setStyleSheet("""

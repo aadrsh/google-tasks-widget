@@ -111,4 +111,4 @@ Add this to your MCP configuration file:
 
 ## 📄 License
 
-Distributed under the MIT License. See `LICENSE` for details.
+Distributed under the GNU General Public License v3.0 (GPLv3). See `LICENSE` for details.

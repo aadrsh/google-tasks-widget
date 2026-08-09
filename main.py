@@ -6,6 +6,11 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QLabel,
                              QCheckBox, QScrollArea, QFrame, QHBoxLayout, 
                              QSpacerItem, QSizePolicy, QPushButton, QLineEdit, 
                              QComboBox, QDateEdit, QListView)
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject, QDate
+from PyQt5.QtGui import QFont, QIcon
+
+# Import our auth module
+from auth import list_accounts, get_service
 
 COMBO_STYLE = """
     QComboBox {
@@ -41,11 +46,6 @@ COMBO_STYLE = """
         outline: none;
     }
 """
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject, QDate
-from PyQt5.QtGui import QFont, QIcon
-
-# Import our auth module
-from auth import list_accounts, get_service
 
 def format_due_date(due_raw, recurrence=None):
     has_repeat = bool(recurrence)
@@ -105,6 +105,7 @@ class GoogleTasksWidget(QWidget):
         self.all_tasks_data = []
         self.task_containers = [] # [(container_widget, title_text, notes_text)]
         self.account_lists_map = [] # [(account_name, list_id, list_title)]
+        self.show_completed = False
         self.res_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'resources')
         
         self.initUI()
@@ -123,7 +124,7 @@ class GoogleTasksWidget(QWidget):
             Qt.Tool
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setGeometry(100, 100, 380, 650)
+        self.setGeometry(100, 100, 380, 680)
         
         # Set Custom Icon
         icon_path = os.path.join(self.res_dir, 'icon.png')
@@ -193,6 +194,9 @@ class GoogleTasksWidget(QWidget):
         
         self.inner_layout.addLayout(header_layout)
         
+        # Filter & Toggle Bar Row
+        filter_row = QHBoxLayout()
+        
         # Search Bar
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("🔍 Search tasks...")
@@ -205,7 +209,25 @@ class GoogleTasksWidget(QWidget):
             QLineEdit:focus { border: 1px solid #4da8da; }
         """)
         self.search_input.textChanged.connect(self.filter_tasks)
-        self.inner_layout.addWidget(self.search_input)
+        filter_row.addWidget(self.search_input)
+        
+        # Completed Toggle Button
+        self.completed_toggle_btn = QPushButton("Completed")
+        self.completed_toggle_btn.setCheckable(True)
+        self.completed_toggle_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(255, 255, 255, 15); color: #aaaaaa;
+                border: 1px solid rgba(255, 255, 255, 20); border-radius: 8px;
+                padding: 5px 8px; font-size: 10px; font-weight: bold;
+            }
+            QPushButton:checked {
+                background-color: #4da8da; color: white; border: 1px solid #4da8da;
+            }
+        """)
+        self.completed_toggle_btn.clicked.connect(self.toggle_completed_view)
+        filter_row.addWidget(self.completed_toggle_btn)
+        
+        self.inner_layout.addLayout(filter_row)
         
         # Collapsible Add Task Form Panel
         self.create_panel = QFrame()
@@ -313,10 +335,14 @@ class GoogleTasksWidget(QWidget):
         self.main_layout.addWidget(self.bg_frame)
         self.setLayout(self.main_layout)
 
+    def toggle_completed_view(self, checked):
+        self.show_completed = checked
+        self.fetch_tasks()
+
     def toggle_add_panel(self):
         is_vis = self.create_panel.isVisible()
         self.create_panel.setVisible(not is_vis)
-        self.add_btn.setText("-" if not is_vis else "+")
+        self.add_btn.setText("-" if not is_vis else "")
 
     def clear_tasks_layout(self):
         self.task_containers = []
@@ -383,21 +409,49 @@ class GoogleTasksWidget(QWidget):
             
             for tasklist in lists:
                 self.account_lists_map.append((account_name, tasklist['id'], f"{account_name} - {tasklist['title']}"))
-                tasks_res = service.tasks().list(tasklist=tasklist['id'], showHidden=False, maxResults=50).execute()
+                tasks_res = service.tasks().list(
+                    tasklist=tasklist['id'], 
+                    showHidden=self.show_completed, 
+                    showCompleted=self.show_completed,
+                    maxResults=100
+                ).execute()
                 tasks = tasks_res.get('items', [])
                 
-                # Filter pending tasks
-                pending = [t for t in tasks if t.get('status') != 'completed']
-                if pending:
+                # Filter tasks based on toggle
+                if not self.show_completed:
+                    filtered_tasks = [t for t in tasks if t.get('status') != 'completed']
+                else:
+                    filtered_tasks = tasks
+                    
+                if filtered_tasks:
+                    # Organize parent-child subtask hierarchy
+                    ordered_tasks = self._organize_subtask_hierarchy(filtered_tasks)
                     account_data['lists'].append({
                         'list_id': tasklist['id'],
                         'title': tasklist['title'],
-                        'tasks': pending
+                        'tasks': ordered_tasks
                     })
             if account_data['lists']:
                 all_accounts_data.append(account_data)
                 
         return all_accounts_data
+
+    def _organize_subtask_hierarchy(self, tasks):
+        """Organizes tasks into parent-child hierarchy so subtasks immediately follow their parent."""
+        parents = [t for t in tasks if not t.get('parent')]
+        children = [t for t in tasks if t.get('parent')]
+        
+        ordered = []
+        for p in parents:
+            ordered.append(p)
+            # Find all children for this parent
+            subtasks = [c for c in children if c.get('parent') == p['id']]
+            ordered.extend(subtasks)
+            
+        # Add any orphan subtasks whose parents might be completed/hidden
+        remaining = [c for c in children if c not in ordered]
+        ordered.extend(remaining)
+        return ordered
 
     def _on_fetch_error(self, error_str):
         self.clear_tasks_layout()
@@ -445,25 +499,34 @@ class GoogleTasksWidget(QWidget):
                     task_layout.setContentsMargins(0, 0, 0, 8)
                     task_layout.setSpacing(2)
                     
-                    if task.get('parent'):
-                        task_layout.setContentsMargins(20, 0, 0, 8)
+                    is_subtask = bool(task.get('parent'))
+                    if is_subtask:
+                        task_layout.setContentsMargins(24, 0, 0, 8)
 
-                    # Top row: Checkbox, Due Date, and Delete Button
+                    # Top row: Checkbox, Subtask Indicator, Due Date, Edit & Delete Buttons
                     top_row = QWidget()
                     top_layout = QHBoxLayout(top_row)
                     top_layout.setContentsMargins(0,0,0,0)
 
-                    cb = QCheckBox(task['title'])
+                    title_prefix = "↳ " if is_subtask else ""
+                    is_completed = (task.get('status') == 'completed')
+                    
+                    cb = QCheckBox(f"{title_prefix}{task['title']}")
                     cb.setFont(QFont('Segoe UI', 11))
-                    cb.setStyleSheet("""
+                    cb.setChecked(is_completed)
+                    
+                    cb_style = """
                         QCheckBox { color: white; spacing: 10px; }
                         QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px; border: 2px solid #555; }
                         QCheckBox::indicator:unchecked:hover { border: 2px solid #888; }
                         QCheckBox::indicator:checked { background-color: #4da8da; border: 2px solid #4da8da; }
-                    """)
-                    if task.get('parent'):
-                        cb.setStyleSheet(cb.styleSheet() + "QCheckBox { color: #dddddd; }")
+                    """
+                    if is_completed:
+                        cb_style += " QCheckBox { color: #666666; text-decoration: line-through; }"
+                    elif is_subtask:
+                        cb_style += " QCheckBox { color: #dddddd; }"
                         
+                    cb.setStyleSheet(cb_style)
                     cb.setProperty('account', acc_data['account'])
                     cb.setProperty('task_id', task['id'])
                     cb.setProperty('list_id', group['list_id'])
@@ -480,6 +543,21 @@ class GoogleTasksWidget(QWidget):
                         date_lbl.setStyleSheet(f"color: {date_color}; font-size: 10px; font-weight: bold;")
                         top_layout.addWidget(date_lbl, alignment=Qt.AlignRight)
                         
+                    # Edit Task Button
+                    edit_btn = QPushButton()
+                    edit_btn.setIcon(QIcon(os.path.join(self.res_dir, 'edit.svg')))
+                    edit_btn.setFixedSize(22, 22)
+                    edit_btn.setToolTip("Edit task details")
+                    edit_btn.setStyleSheet("""
+                        QPushButton { background: transparent; border: none; padding: 2px; }
+                        QPushButton:hover { background: rgba(77, 168, 218, 40); border-radius: 4px; }
+                    """)
+                    edit_btn.setProperty('task_data', task)
+                    edit_btn.setProperty('account', acc_data['account'])
+                    edit_btn.setProperty('list_id', group['list_id'])
+                    edit_btn.clicked.connect(self.on_edit_task)
+                    top_layout.addWidget(edit_btn)
+
                     # Delete Task Button
                     del_btn = QPushButton()
                     del_btn.setIcon(QIcon(os.path.join(self.res_dir, 'delete.svg')))
@@ -591,30 +669,47 @@ class GoogleTasksWidget(QWidget):
 
     def on_task_checked(self, checked):
         cb = self.sender()
+        account_name = cb.property('account')
+        task_id = cb.property('task_id')
+        list_id = cb.property('list_id')
+        container = cb.property('container')
+        
         if checked:
             cb.setStyleSheet(cb.styleSheet() + "QCheckBox { color: #555555; text-decoration: line-through; }")
-            cb.setEnabled(False)
+        else:
+            cb.setStyleSheet(cb.styleSheet().replace("color: #555555; text-decoration: line-through;", ""))
             
-            container = cb.property('container')
-            if container:
-                container.setEnabled(False)
-                        
-            account_name = cb.property('account')
-            task_id = cb.property('task_id')
-            list_id = cb.property('list_id')
+        status = 'completed' if checked else 'needsAction'
+        worker = ApiWorker(self._api_toggle_task_status, account_name, list_id, task_id, status)
+        worker.start()
             
-            worker = ApiWorker(self._api_complete_task, account_name, list_id, task_id)
-            worker.start()
-            
-    def _api_complete_task(self, account_name, list_id, task_id):
+    def _api_toggle_task_status(self, account_name, list_id, task_id, status):
         try:
             service = self.services.get(account_name)
             if service:
                 task = service.tasks().get(tasklist=list_id, task=task_id).execute()
-                task['status'] = 'completed'
+                task['status'] = status
                 service.tasks().update(tasklist=list_id, task=task_id, body=task).execute()
         except Exception:
             pass
+
+    def on_edit_task(self):
+        btn = self.sender()
+        task_data = btn.property('task_data')
+        account_name = btn.property('account')
+        list_id = btn.property('list_id')
+        
+        # Populate create_panel with task data for editing
+        self.create_panel.setVisible(True)
+        self.new_task_title.setText(task_data.get('title', ''))
+        self.new_task_notes.setText(task_data.get('notes', ''))
+        
+        # Set dropdown account/list match
+        for idx in range(self.list_selector.count()):
+            data = self.list_selector.itemData(idx)
+            if data == (account_name, list_id):
+                self.list_selector.setCurrentIndex(idx)
+                break
 
     def on_delete_task(self):
         btn = self.sender()
